@@ -1,0 +1,57 @@
+name: 🔄 Sync with upstream pcee2
+
+# Keeps this fork's libretro branch on top of WizzardSK/pcee2-libretro:
+# when upstream has new commits, the fork's own commits are rebased onto
+# them and force-pushed, which starts the Libretro Core Builds workflow.
+# A rebase conflict fails this run and leaves the branch untouched.
+#
+# Pushes with the SYNC_TOKEN secret (a fine-grained token with Contents
+# and Workflows write on this repository): the built-in GITHUB_TOKEN may
+# not push changes to workflow files, and its pushes start no workflows.
+
+on:
+  schedule:
+    - cron: "17 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.repository == 'nobz226/pcee2-libretro'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout libretro
+        uses: actions/checkout@v4
+        with:
+          ref: libretro
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_TOKEN }}
+
+      - name: Rebase onto upstream and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/WizzardSK/pcee2-libretro.git
+          git fetch upstream libretro
+
+          if git merge-base --is-ancestor upstream/libretro HEAD; then
+            echo "Already on top of upstream $(git rev-parse --short upstream/libretro)."
+            exit 0
+          fi
+
+          old=$(git rev-parse HEAD)
+          if ! git rebase upstream/libretro; then
+            git status --short
+            git rebase --abort
+            echo "::error::Rebase onto upstream $(git rev-parse --short upstream/libretro) conflicts; libretro was left as it was."
+            exit 1
+          fi
+
+          git push --force-with-lease=libretro:$old origin HEAD:libretro
+          echo "libretro rebased onto upstream $(git rev-parse --short upstream/libretro)."
