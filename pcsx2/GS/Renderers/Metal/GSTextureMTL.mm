@@ -217,6 +217,13 @@ void GSDownloadTextureMTL::CopyFromTexture(
 	[encoder endEncoding];
 	[m_copy_cmdbuffer popDebugGroup];
 
+	// Nothing presents on a surfaceless device, so nothing else commits this
+	// command buffer before the copy is read back. Commit it now, without
+	// waiting: a readback a frame later then finds it done instead of
+	// committing it then and stalling on the whole frame's GPU work.
+	if (m_dev->GetWindowInfo().type == WindowInfo::Type::Surfaceless)
+		m_dev->FlushEncoders();
+
 	m_needs_flush = true;
 }}
 
