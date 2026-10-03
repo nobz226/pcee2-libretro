@@ -867,6 +867,9 @@ void LibretroHost::ReadCoreOptions(bool startup)
 		}
 	}
 
+	s_settings_interface.SetBoolValue("EmuCore/GS", "HWROV",
+		std::strcmp(get_option("pcsx2_rov", "disabled"), "enabled") == 0);
+
 	static constexpr std::pair<const char*, BiFiltering> bi_filters[] = {
 		{"nearest", BiFiltering::Nearest}, {"bilinear_ps2", BiFiltering::PS2},
 		{"bilinear_forced", BiFiltering::Forced}, {"bilinear_forced_sprite", BiFiltering::Forced_But_Sprite}};
@@ -1085,6 +1088,8 @@ void LibretroHost::ReadCoreOptions(bool startup)
 void LibretroHost::CPUThreadMain()
 {
 	s_cpu_thread_id = std::this_thread::get_id();
+	// The EE/IOP thread is the emulator's critical path; keep it on the performance cores.
+	Threading::SetCurrentThreadHighPerformance();
 
 	const bool init_ok = VMManager::Internal::CPUThreadInitialize();
 	if (!init_ok)
@@ -1214,6 +1219,72 @@ static const VkApplicationInfo* GetVulkanApplicationInfo(void)
 	app_info.engineVersion = VK_MAKE_VERSION(2, 0, 0);
 	app_info.apiVersion = VK_API_VERSION_1_1;
 	return &app_info;
+}
+
+// Negotiation v2 create_instance: lets the core put its own settings on the VkInstance the
+// frontend creates (the wrapper still adds the frontend's required/optional extensions and
+// layers). On macOS this is the only place the core can configure MoltenVK, which reads its
+// configuration once per instance at creation time.
+static VkInstance CreateVulkanInstance(PFN_vkGetInstanceProcAddr get_instance_proc_addr, const VkApplicationInfo* app,
+	retro_vulkan_create_instance_wrapper_t create_instance_wrapper, void* opaque)
+{
+	VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
+	info.pApplicationInfo = app;
+
+#ifdef __APPLE__
+	// MoltenVK defaults to synchronous queue submits: vkQueueSubmit encodes the whole
+	// frame's Metal command buffers on the calling thread - the GS thread - while holding
+	// the queue lock shared with the frontend (profiled: ~15% of GS-thread time in
+	// MVKQueueCommandBufferSubmission::execute, plus waits on that lock). Turning it off
+	// makes MoltenVK hand the encoding to a serial GCD queue per VkQueue (ordering is
+	// preserved; its priority follows the 1.0 graphics queue priority GSDeviceVK requests),
+	// so the GS thread returns to emulation immediately. Set through the standard
+	// VK_EXT_layer_settings extension, which MoltenVK only honours when it is enabled.
+	static const VkBool32 kSynchronousSubmits = VK_FALSE;
+	static const VkLayerSettingEXT kMoltenVKSettings[] = {
+		{"MoltenVK", "MVK_CONFIG_SYNCHRONOUS_QUEUE_SUBMITS", VK_LAYER_SETTING_TYPE_BOOL32_EXT, 1, &kSynchronousSubmits},
+	};
+	static const char* const kLayerSettingsExtension = VK_EXT_LAYER_SETTINGS_EXTENSION_NAME;
+	VkLayerSettingsCreateInfoEXT layer_settings{VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT};
+
+	retro_variable var = {"pcsx2_mvk_async_submit", nullptr};
+	const bool async_submit = !(s_environ_cb && s_environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value &&
+								  std::strcmp(var.value, "disabled") == 0);
+	if (async_submit)
+	{
+		// Only ask for the extension when the implementation offers it, so a non-MoltenVK
+		// driver (or an older MoltenVK) still gets a plain instance.
+		bool has_layer_settings = false;
+		const auto enumerate = reinterpret_cast<PFN_vkEnumerateInstanceExtensionProperties>(
+			get_instance_proc_addr(VK_NULL_HANDLE, "vkEnumerateInstanceExtensionProperties"));
+		u32 count = 0;
+		if (enumerate && enumerate(nullptr, &count, nullptr) == VK_SUCCESS && count > 0)
+		{
+			std::vector<VkExtensionProperties> props(count);
+			if (enumerate(nullptr, &count, props.data()) == VK_SUCCESS)
+			{
+				for (u32 i = 0; i < count && !has_layer_settings; i++)
+					has_layer_settings = (std::strcmp(props[i].extensionName, kLayerSettingsExtension) == 0);
+			}
+		}
+
+		if (has_layer_settings)
+		{
+			layer_settings.settingCount = static_cast<u32>(std::size(kMoltenVKSettings));
+			layer_settings.pSettings = kMoltenVKSettings;
+			info.pNext = &layer_settings;
+			info.enabledExtensionCount = 1;
+			info.ppEnabledExtensionNames = &kLayerSettingsExtension;
+			Console.WriteLn("Vulkan: requesting asynchronous MoltenVK queue submits.");
+		}
+		else
+		{
+			Console.Warning("Vulkan: VK_EXT_layer_settings unavailable; MoltenVK keeps synchronous submits.");
+		}
+	}
+#endif
+
+	return create_instance_wrapper(opaque, &info);
 }
 
 static bool CreateVulkanDevice(retro_vulkan_context* context, VkInstance instance, VkPhysicalDevice gpu,
@@ -1995,6 +2066,8 @@ bool retro_load_game(const struct retro_game_info* game)
 				GetVulkanApplicationInfo,
 				CreateVulkanDevice,
 				nullptr, // destroy_device
+				CreateVulkanInstance, // v2: create_instance
+				nullptr, // v2: create_device2 (create_device is used)
 			};
 			s_environ_cb(RETRO_ENVIRONMENT_SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE, (void*)&neg_iface);
 
