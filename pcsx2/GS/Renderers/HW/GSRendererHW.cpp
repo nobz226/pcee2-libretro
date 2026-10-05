@@ -8650,7 +8650,21 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 
 	const GSVector2i scaled_copy_size = GSVector2i(static_cast<int>(std::ceil(static_cast<float>(copy_size.x) * scale)),
 		static_cast<int>(std::ceil(static_cast<float>(copy_size.y) * scale)));
-	const bool clear = src_target->m_texture->IsRenderTarget();
+	// Metal: take the copy with a blit instead of a render pass when the two give the same texels.
+	// Every autoflushed draw that samples its own target needs one of these copies, and on Apple GPUs
+	// the render pass a StretchRect opens costs far more than the copy itself - Jak II's screen effects
+	// take hundreds per frame, which held the GS thread to about half speed. Same-format color is a
+	// plain COPY, and at a whole-number scale on a texture that is exactly unscaled size * scale, the
+	// nearest-sampled StretchRect maps texels 1:1. The blit skips the clear (another render pass), so
+	// texels outside the copied rect are left undefined instead of zero; the draw doesn't sample them.
+	// Opt-in per game (HWMetalHazardBlit) since that last part rests on the coverage estimate.
+	const int blit_scale = static_cast<int>(scale);
+	const bool blit_copy = GSConfig.HWMetalHazardBlit && !m_downscale_source &&
+		g_gs_device->GetRenderAPI() == RenderAPI::Metal && blit_scale > 0 && static_cast<float>(blit_scale) == scale &&
+		src_target->m_texture->GetFormat() == GSTexture::Format::Color && !src_target->m_texture->IsShaderWrite() &&
+		src_target->m_texture->GetSize() == GSVector2i(src_unscaled_size.x * blit_scale, src_unscaled_size.y * blit_scale);
+
+	const bool clear = src_target->m_texture->IsRenderTarget() && !blit_copy;
 	src_copy.reset(g_gs_device->CreateCompatible(src_target->m_texture, scaled_copy_size, clear));
 	if (!src_copy) [[unlikely]]
 	{
@@ -8696,10 +8710,30 @@ __ri void GSRendererHW::HandleTextureHazards(const GSTextureCache::Target* rt, c
 		copy_range.w += 1;
 		copy_range = copy_range.rintersect(src_bounds);
 
-		const GSVector4 src_rect = GSVector4(copy_range) / GSVector4(src_unscaled_size).xyxy();
-		const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
+		if (blit_copy)
+		{
+			// The same rect the StretchRect below draws, clipped to the copy texture like the draw would be.
+			const GSVector4i dst_unscaled = (copy_range - offset.xyxy()).rintersect(GSVector4i::loadh(copy_size));
+			const GSVector4i src_unscaled = dst_unscaled + offset.xyxy();
+			if (!src_unscaled.rempty())
+			{
+				const GSVector4i src_px = GSVector4i(src_unscaled.x * blit_scale, src_unscaled.y * blit_scale,
+					src_unscaled.z * blit_scale, src_unscaled.w * blit_scale);
+				g_gs_device->CopyRect(src_target->m_texture, src_copy.get(), src_px,
+					static_cast<u32>(dst_unscaled.x * blit_scale), static_cast<u32>(dst_unscaled.y * blit_scale));
+			}
 
-		g_gs_device->StretchRectAuto(src_target->m_texture, src_rect, src_copy.get(), dst_rect, Nearest);
+			// A partial copy leaves it invalidated; it holds data now (a carried-forward clear stays as is).
+			if (src_copy->GetState() == GSTexture::State::Invalidated)
+				src_copy->SetState(GSTexture::State::Dirty);
+		}
+		else
+		{
+			const GSVector4 src_rect = GSVector4(copy_range) / GSVector4(src_unscaled_size).xyxy();
+			const GSVector4 dst_rect = (GSVector4(copy_range) - GSVector4(offset).xyxy()) * scale;
+
+			g_gs_device->StretchRectAuto(src_target->m_texture, src_rect, src_copy.get(), dst_rect, Nearest);
+		}
 	}
 	m_conf.tex = src_copy.get();
 }
