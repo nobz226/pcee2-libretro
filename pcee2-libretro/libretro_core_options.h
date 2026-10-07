@@ -109,10 +109,10 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 		NULL, "graphics",
 		{{"disabled", NULL}, {"enabled", NULL}, {NULL, NULL}}, "disabled"},
 #ifdef __APPLE__
-	{"pcsx2_mvk_async_submit", "MoltenVK Asynchronous Submits", NULL,
-		"Let MoltenVK translate each frame to Metal on its own thread instead of the GS thread, which then returns to emulation immediately. Disable if you see rendering problems. Requires restarting RetroArch.",
+	{"pcsx2_mvk_async_submit", "MoltenVK Asynchronous Submits (Experimental)", NULL,
+		"Vulkan renderer only. Let MoltenVK translate each frame to Metal on its own thread instead of the GS thread, which then returns to emulation immediately. Experimental: MoltenVK can free a frame that is still queued for presentation, which crashes RetroArch at random during play. Requires restarting RetroArch.",
 		NULL, "graphics",
-		{{"enabled", NULL}, {"disabled", NULL}, {NULL, NULL}}, "enabled"},
+		{{"disabled", NULL}, {"enabled", NULL}, {NULL, NULL}}, "disabled"},
 #endif
 	{"pcsx2_texture_filtering", "Texture Filtering", NULL,
 		"Bilinear (PS2) replicates the console; forced modes smooth all textures.", NULL, "graphics",

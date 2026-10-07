@@ -1267,8 +1267,8 @@ static VkInstance CreateVulkanInstance(PFN_vkGetInstanceProcAddr get_instance_pr
 	VkLayerSettingsCreateInfoEXT layer_settings{VK_STRUCTURE_TYPE_LAYER_SETTINGS_CREATE_INFO_EXT};
 
 	retro_variable var = {"pcsx2_mvk_async_submit", nullptr};
-	const bool async_submit = !(s_environ_cb && s_environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value &&
-								  std::strcmp(var.value, "disabled") == 0);
+	const bool async_submit = s_environ_cb && s_environ_cb(RETRO_ENVIRONMENT_GET_VARIABLE, &var) && var.value &&
+							  std::strcmp(var.value, "enabled") == 0;
 	if (async_submit)
 	{
 		// Only ask for the extension when the implementation offers it, so a non-MoltenVK
