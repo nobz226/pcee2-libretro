@@ -10,6 +10,8 @@ on:
 
 jobs:
   build_linux:
+    # Off in this fork: only the macOS builds are needed. Delete this line to turn it back on.
+    if: ${{ false }}
     name: "Linux x86_64"
     runs-on: ubuntu-24.04
     timeout-minutes: 90
@@ -80,6 +82,8 @@ jobs:
           path: artifact/*
 
   build_linux_arm64:
+    # Off in this fork: only the macOS builds are needed. Delete this line to turn it back on.
+    if: ${{ false }}
     name: "Linux aarch64"
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
@@ -138,6 +142,8 @@ jobs:
           path: artifact/*
 
   build_linux_arm64_static:
+    # Off in this fork: only the macOS builds are needed. Delete this line to turn it back on.
+    if: ${{ false }}
     name: "Linux aarch64 (static SDL3)"
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
@@ -207,6 +213,8 @@ jobs:
           path: artifact/*
 
   build_linux_arm64_bookworm:
+    # Off in this fork: only the macOS builds are needed. Delete this line to turn it back on.
+    if: ${{ false }}
     name: "Linux aarch64 (Debian Bookworm, static SDL3)"
     runs-on: ubuntu-24.04-arm
     container: debian:bookworm
@@ -296,6 +304,8 @@ jobs:
           path: artifact/*
 
   build_linux_arm64_bookworm_16k:
+    # Off in this fork: only the macOS builds are needed. Delete this line to turn it back on.
+    if: ${{ false }}
     name: "Linux aarch64 (Debian Bookworm, 16 KB pages, Pi 5)"
     runs-on: ubuntu-24.04-arm
     container: debian:bookworm
@@ -389,6 +399,8 @@ jobs:
           path: artifact/*
 
   build_windows:
+    # Off in this fork: only the macOS builds are needed. Delete this line to turn it back on.
+    if: ${{ false }}
     name: "Windows x64 (MSVC)"
     runs-on: windows-2025
     timeout-minutes: 150
