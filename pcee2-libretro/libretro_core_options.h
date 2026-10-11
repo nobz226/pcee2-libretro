@@ -73,7 +73,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 	// with nothing to construct (Android turns OpenGL off entirely), so the
 	// list only carries what is actually compiled in.
 	{"pcsx2_renderer", "Renderer", NULL,
-		"Hardware renderer API, or the software renderer. Switching to or from Software applies on the fly; switching between hardware APIs takes effect when the content is restarted.",
+		"Hardware renderer API, or the software renderer. Switching to or from Software applies on the fly; switching between hardware APIs takes effect when the content is restarted. Software is experimental: opening the Quick Menu or switching to it mid-game can freeze or crash.",
 		NULL, "graphics",
 		{
 #ifdef ENABLE_VULKAN
@@ -85,7 +85,7 @@ struct retro_core_option_v2_definition option_defs_us[] = {
 #if defined(__APPLE__) && !defined(PCSX2_DISABLE_METAL)
 			{"metal", "Metal (Hardware, copied to frontend)"},
 #endif
-			{"software", "Software"}, {NULL, NULL}},
+			{"software", "Software (Experimental)"}, {NULL, NULL}},
 		"vulkan"},
 	{"pcsx2_upscale_multiplier", "Internal Resolution", NULL,
 		"Internal rendering resolution multiplier for the hardware renderer. Also scales the output framebuffer. Applies on the fly.",
