@@ -105,6 +105,21 @@ namespace LibretroHost
 	static MemorySettingsInterface s_settings_interface;
 	static std::string s_system_dir;
 
+	// Memory cards live with the frontend's saves (<save dir>/memcards), so they
+	// follow whichever save folder RetroArch uses - one per user profile. Without
+	// a save directory they stay in <system>/pcsx2/memcards as before. A card that
+	// does not exist yet is created blank by PCSX2 on first use.
+	static std::string GetMemoryCardsDir()
+	{
+		const char* save_dir = nullptr;
+		if (s_environ_cb && s_environ_cb(RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY, &save_dir) && save_dir && save_dir[0])
+			return Path::Combine(save_dir, "memcards");
+		const char* system_dir = nullptr;
+		if (s_environ_cb && s_environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) && system_dir)
+			return Path::Combine(Path::Combine(system_dir, "pcsx2"), "memcards");
+		return Path::Combine("pcsx2", "memcards");
+	}
+
 	// CPU thread management. The thread persists across game sessions (like
 	// the Qt frontend's EmuThread) because VMManager::Internal::
 	// CPUThreadInitialize may only run once per process (page fault handler,
@@ -604,6 +619,9 @@ bool LibretroHost::InitializeConfig()
 		}
 	}
 
+	// absolute, so PCSX2 does not resolve it against DataRoot
+	si.SetStringValue("Folders", "MemoryCards", GetMemoryCardsDir().c_str());
+
 	VMManager::Internal::LoadStartupSettings();
 
 	EmuFolders::EnsureFoldersExist();
@@ -694,11 +712,9 @@ void LibretroHost::RegisterCoreOptions()
 	// EmuFolders::MemoryCards, which is populated during startup configuration.
 	s_memcard_names.clear();
 	{
-		const char* system_dir = nullptr;
-		if (s_environ_cb(RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY, &system_dir) && system_dir)
 		{
 			FileSystem::FindResultsArray files;
-			const std::string memcards_dir = Path::Combine(Path::Combine(system_dir, "pcsx2"), "memcards");
+			const std::string memcards_dir = LibretroHost::GetMemoryCardsDir();
 			FileSystem::FindFiles(memcards_dir.c_str(), "*", FILESYSTEM_FIND_FILES, &files);
 			for (const FILESYSTEM_FIND_DATA& fd : files)
 			{
@@ -1497,6 +1513,20 @@ void retro_set_environment(retro_environment_t cb)
 	bool no_game = true;
 	cb(RETRO_ENVIRONMENT_SET_SUPPORT_NO_GAME, &no_game);
 
+	// One controller type per port, so Controls > Port N > Device Type reads
+	// "DualShock 2" instead of the generic RetroPad.
+	{
+		static const retro_controller_description kPads[] = {
+			{"DualShock 2", RETRO_DEVICE_JOYPAD},
+		};
+		static const retro_controller_info kPorts[] = {
+			{kPads, 1}, {kPads, 1}, {kPads, 1}, {kPads, 1},
+			{kPads, 1}, {kPads, 1}, {kPads, 1}, {kPads, 1},
+			{nullptr, 0},
+		};
+		cb(RETRO_ENVIRONMENT_SET_CONTROLLER_INFO, (void*)kPorts);
+	}
+
 	retro_log_callback log_cb{};
 	if (cb(RETRO_ENVIRONMENT_GET_LOG_INTERFACE, &log_cb))
 		s_log_cb = log_cb.log;
@@ -2001,8 +2031,51 @@ static std::string BuildDiscList(const char* content_path)
 // registers it before that point in the file.
 static void RETRO_CALLCONV AudioBufferStatus(bool active, unsigned occupancy, bool underrun_likely);
 
+// PS2 names for the RetroPad buttons, shown in RetroArch's Controls menus. The
+// mapping is the one UpdateInput() uses (B = Cross, A = Circle, Y = Square,
+// X = Triangle), for every pad a multitap can add.
+static void SetInputDescriptors()
+{
+	static const struct
+	{
+		unsigned device, index, id;
+		const char* name;
+	} kButtons[] = {
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_UP, "D-Pad Up"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_DOWN, "D-Pad Down"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_LEFT, "D-Pad Left"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_RIGHT, "D-Pad Right"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_B, "Cross"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_A, "Circle"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_Y, "Square"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_X, "Triangle"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L, "L1"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R, "R1"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L2, "L2"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R2, "R2"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_L3, "L3"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_R3, "R3"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_SELECT, "Select"},
+		{RETRO_DEVICE_JOYPAD, 0, RETRO_DEVICE_ID_JOYPAD_START, "Start"},
+		{RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_X, "Left Stick X"},
+		{RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_LEFT, RETRO_DEVICE_ID_ANALOG_Y, "Left Stick Y"},
+		{RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_X, "Right Stick X"},
+		{RETRO_DEVICE_ANALOG, RETRO_DEVICE_INDEX_ANALOG_RIGHT, RETRO_DEVICE_ID_ANALOG_Y, "Right Stick Y"},
+	};
+	static constexpr unsigned kPorts = 8;
+	static retro_input_descriptor desc[kPorts * std::size(kButtons) + 1];
+	size_t n = 0;
+	for (unsigned port = 0; port < kPorts; port++)
+		for (const auto& b : kButtons)
+			desc[n++] = {port, b.device, b.index, b.id, b.name};
+	desc[n] = {0, 0, 0, 0, nullptr};
+	s_environ_cb(RETRO_ENVIRONMENT_SET_INPUT_DESCRIPTORS, desc);
+}
+
 bool retro_load_game(const struct retro_game_info* game)
 {
+	SetInputDescriptors();
+
 	// Each game pads with silence until its own first sound (see OutputAudio).
 	s_audio_frames_output.store(0, std::memory_order_relaxed);
 
