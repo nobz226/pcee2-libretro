@@ -1,5 +1,7 @@
 # PCEE2 — PCSX2 libretro core
 
+> **About this fork (nobz226/pcee2-libretro).** The PS2 core of the [MacOS-ARM-Nobz Edition](https://github.com/nobz226/retroarch-macos-arm-nobz) for Apple Silicon Macs, built from `libretro` (macOS jobs only). On top of [WizzardSK/pcee2-libretro](https://github.com/WizzardSK/pcee2-libretro) it adds the **Metal** renderer on the readback path (with the GS shader library linked into the core), faster ARM64 recompilers, sleeps and thread priorities fixed for Apple Silicon, an LTO build, experimental MoltenVK async submits and Raster Order Views options, smoother audio pacing after a pause on the Vulkan renderer, GS dumps via a trigger file, PS2 button names, and memory cards in the save folder. Most of it is offered upstream as pull requests (#54 to #59).
+
 ![Libretro Core Builds](https://img.shields.io/github/actions/workflow/status/WizzardSK/pcee2-libretro/libretro_builds.yml?branch=libretro&label=core%20builds)
 
 A [libretro](https://www.libretro.com/) core frontend for the current PCSX2
@@ -33,7 +35,7 @@ This project is not affiliated with or endorsed by the PCSX2 team.
 | Fast-forward | ✅ working |
 | OpenGL renderer | ✅ working (surfaceless EGL) |
 | D3D11 / D3D12 renderers | ⚠️ in the Windows build, untested |
-| Metal renderer | ⚠️ in the macOS build, untested (Vulkan via MoltenVK is the default) |
+| Metal renderer | ✅ macOS: on the readback path (the GS draws on its own Metal device and each frame is copied back), whatever video driver RetroArch runs |
 | RetroAchievements | ✅ via RetroArch (EE RAM exposed; log in to RetroAchievements in RetroArch settings) |
 | Multitap (up to 8 controllers) | ✅ core option |
 | Lightgun (GunCon 2 via USB) | ✅ core option, aimed by frontend lightgun/mouse |
