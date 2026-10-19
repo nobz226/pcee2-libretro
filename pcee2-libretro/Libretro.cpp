@@ -2567,12 +2567,62 @@ static bool FrontendAheadOfAudio()
 	return !(s_environ_cb && s_environ_cb(RETRO_ENVIRONMENT_GET_FASTFORWARDING, &fast_forward) && fast_forward);
 }
 
+// Whether this retro_run() should hand the frontend no audio, decided once per
+// call by DecideAudioHold().
+static bool s_audio_hold = false;
+
+// Leave the frontend alone while its buffer stays nearly full: what it does
+// with an over-full one is block, and on some drivers block for good.
+//
+// A nearly full reading on its own says nothing of the kind. The frontend reads
+// its buffer before retro_run(), which is just after the last call's audio went
+// in and a whole frame of playback before this call's goes in, so a buffer that
+// is draining normally reads 90% and more whenever the last frame's audio took
+// it there. Holding back on that reading alone halved the frontend's feed into
+// one frame of nothing and one of double: the double did not fit and the write
+// blocked a device period - a frame shown 10ms late, a hitch on screen every
+// few tenths of a second - and the frontend's rate control, which measures at
+// the writes, never saw the buffer it was meant to hold.
+//
+// So a full reading right after ordinary audio is taken as that audio, and one
+// after audio went in on a full reading as the cue to look again; audio is held
+// back from then on for as long as the buffer does not go down.
+static void DecideAudioHold()
+{
+	enum class Last
+	{
+		Wrote,     // the last call wrote on a reading below the mark
+		WroteFull, // it wrote on a reading above it
+		Held,      // it held back
+	};
+	static Last s_last = Last::Wrote;
+	static unsigned s_held_occupancy = 0;
+
+	const unsigned occupancy = s_audio_occupancy.load(std::memory_order_acquire);
+	const bool full = s_audio_status_known.load(std::memory_order_acquire) && occupancy >= 90;
+
+	if (!full)
+		s_audio_hold = false;
+	else if (s_last == Last::Wrote)
+		s_audio_hold = false;
+	else if (s_last == Last::WroteFull)
+		s_audio_hold = true;
+	else
+		s_audio_hold = occupancy + 5 > s_held_occupancy; // not draining
+
+	if (s_audio_hold)
+	{
+		if (s_last != Last::Held)
+			s_held_occupancy = occupancy;
+		s_last = Last::Held;
+	}
+	else
+		s_last = full ? Last::WroteFull : Last::Wrote;
+}
+
 static void OutputAudio(bool pad_when_empty = true)
 {
-	// Leave the frontend alone while its buffer is nearly full: what it does
-	// with an over-full one is block, and on some drivers block for good.
-	if (s_audio_status_known.load(std::memory_order_acquire) &&
-		s_audio_occupancy.load(std::memory_order_acquire) >= 90)
+	if (s_audio_hold)
 		return;
 
 	if (!s_audio_batch_cb)
@@ -2903,6 +2953,7 @@ void retro_run(void)
 	// block would have held it. Not while fast-forwarding, where a full
 	// buffer is the point.
 	const bool audio_ahead = FrontendAheadOfAudio();
+	DecideAudioHold();
 
 	std::unique_lock lock(s_frame_mutex);
 	bool got_frame = false;
